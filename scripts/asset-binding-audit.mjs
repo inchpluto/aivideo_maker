@@ -1,0 +1,7 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+const root=await mkdtemp(path.join(tmpdir(),'xingmu-binding-'));process.env.DATA_DIR=root;const { bindProviderAsset, readAssetBinding }=await import('../server/assetBindings.mjs');const fixture=path.join(root,'fixture.mp4');const made=spawnSync('ffmpeg',['-y','-f','lavfi','-i','color=c=green:s=160x90:d=0.6','-c:v','libx264','-pix_fmt','yuv420p',fixture],{encoding:'utf8'});assert.equal(made.status,0,made.stderr);const base64=(await readFile(fixture)).toString('base64');
+try { await assert.rejects(()=>bindProviderAsset({providerTaskId:'failed-1',projectId:'p',base64:'bad',contentType:'video/mp4'}));const recovered=await bindProviderAsset({providerTaskId:'failed-1',projectId:'p',base64,contentType:'video/mp4'});const results=await Promise.all([bindProviderAsset({providerTaskId:'same-1',projectId:'p',base64,contentType:'video/mp4'}),bindProviderAsset({providerTaskId:'same-1',projectId:'p',base64,contentType:'video/mp4'})]);assert.equal(results[0].url,results[1].url);assert.equal((await readdir(path.join(root,'assets','p'))).length,2);const binding=await readAssetBinding('same-1','p');assert.equal(binding.status,'BOUND');assert.equal(recovered.probeStatus,'passed');console.log(JSON.stringify({ok:true,failedThenRecovered:'BOUND',concurrent:'deduplicated',assets:2}));}finally{await rm(root,{recursive:true,force:true});}

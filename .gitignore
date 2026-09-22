@@ -1,0 +1,32 @@
+.env
+.env.*
+!.env.example
+
+# Runtime data (projects, rendered media, provider credentials)
+server/data/*
+!server/data/.gitkeep
+!server/data/assets/
+server/data/assets/*
+!server/data/assets/.gitkeep
+
+# Build output
+dist/
+dist-demo/
+.audit-build/
+.local-baseline-*/
+
+# Logs
+*.log
+.server-*.err
+.server-*.out
+debug.log
+
+# Tooling caches / local agent artifacts
+node_modules/
+.pnpm-store/
+.dsh-vision-router/
+
+# Local recovery leftovers (kept on disk, not part of the project)
+*.corrupted.bak
+*.reversed-check
+*.recovered

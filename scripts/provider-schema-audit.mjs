@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { validateProviderInput, validateProviderOutput } from '../server/providerSchemas.mjs';
+assert.equal(validateProviderInput('story', { title: '审计剧本', synopsis: '主角发现来信。' }).valid, true);
+assert.equal(validateProviderInput('story', {}).issues[0].path, '$.payload');
+assert.equal(validateProviderInput('video', { duration: -1 }).issues.some(item => item.path === '$.payload.duration'), true);
+assert.equal(validateProviderOutput('story', { screenplay: { title: '审计', logline: '线索', storyBible: {}, platformPlan: {}, episodes: [{}], storyboard: [{}] } }).valid, true);
+assert.equal(validateProviderOutput('story', { screenplay: {} }).issues.some(item => item.path === '$.screenplay.episodes'), true);
+assert.equal(validateProviderOutput('editing', { operations: [{ operation: 'trim', target: 'A1', params: {}, reason: '审计' }] }).valid, true);
+assert.equal(validateProviderOutput('editing', { operations: [{}] }).issues.some(item => item.path === '$.operations[0].operation'), true);
+assert.equal(validateProviderOutput('character', {}).valid, false);
+assert.equal(validateProviderOutput('character', { imageBase64: 'ZmFrZQ==' }).valid, true);
+assert.equal(validateProviderOutput('voice', { audioBase64: 'ZmFrZQ==' }).valid, true);
+assert.equal(validateProviderOutput('video', { taskId: 'op-1', status: 'PENDING', output: [] }).valid, true);
+assert.equal(validateProviderOutput('video', { status: 'SUCCEEDED', output: [] }).issues.some(item => item.path === '$.output'), true);
+assert.equal(validateProviderOutput('video', { status: 'BROKEN', taskId: 'op-1' }).issues.some(item => item.path === '$.status'), true);
+assert.equal(validateProviderOutput('video', { status: 'SUCCEEDED', videoBase64: 'ZmFrZQ==' }).valid, true);
+console.log('Provider schema audit passed.');

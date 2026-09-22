@@ -1,0 +1,5 @@
+/* Keep long export dialogs usable on desktop-sized viewports as well as mobile. */
+.export-modal {
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}

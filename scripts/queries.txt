@@ -1,0 +1,21 @@
+environmentAction
+shot.prompt
+subjectAction
+label}</b><em>
+</em>
+join("、")
+join(" · ")
+（{
+完整参考组
+不加入人物参考
+待补全
+审核首帧
+图生视频
+文生视频
+生成中…
+导入并自动设计
+开始创建
+打开案例
+共 
+个 →
+项目

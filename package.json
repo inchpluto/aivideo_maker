@@ -1,0 +1,62 @@
+{
+  "name": "xingmu-ai-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=20.19.0 <25"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "server": "node --env-file-if-exists=.env server/index.mjs",
+    "build": "vite build",
+    "build:demo": "vite build --mode demo --outDir dist-demo",
+    "preview": "vite preview --host 127.0.0.1",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",
+    "check": "node scripts/check.mjs",
+    "lint": "node scripts/lint.mjs",
+    "test": "pnpm check",
+    "test:prompts": "node scripts/prompt-contract-audit.mjs",
+    "test:plan": "node scripts/production-plan-audit.mjs",
+    "test:motion": "node scripts/motion-contract-audit.mjs",
+    "test:editing": "node scripts/editing-plan-audit.mjs",
+    "test:context": "node scripts/creative-context-audit.mjs",
+    "test:models": "node scripts/model-route-audit.mjs",
+  "test:voices": "node scripts/voice-library-audit.mjs",
+  "test:tts-provider": "node scripts/local-tts-provider-audit.mjs",
+  "test:local-v1": "node scripts/local-v1-acceptance-audit.mjs",
+    "test:upload-cancel": "node scripts/media-upload-cancel-audit.mjs",
+    "test:caption-http": "node scripts/caption-export-http-audit.mjs",
+    "test:request-diagnostics": "node scripts/request-error-diagnostics-audit.mjs",
+    "test:package-sqlite-conflict": "node scripts/project-package-sqlite-conflict-audit.mjs",
+    "test:render-cancel-race": "node scripts/render-cancel-race-audit.mjs",
+    "test:voice-performance": "node scripts/voice-performance-audit.mjs",
+    "test:timeline": "node scripts/timeline-interaction-audit.mjs",
+    "test:ui": "node scripts/editor-ui-audit.mjs",
+    "test:canvas": "node scripts/canvas-workflow-audit.mjs",
+    "test:effects": "node scripts/react-effect-audit.mjs",
+    "test:linkage": "node scripts/asset-linkage-audit.mjs",
+    "test:script-voice-ui": "node scripts/script-voice-ui-audit.mjs",
+    "test:assistant-route": "node scripts/assistant-route-audit.mjs",
+    "test:runway-prompt": "node scripts/runway-prompt-audit.mjs",
+    "test:video-platforms": "node scripts/video-platform-audit.mjs",
+    "test:performance": "node scripts/performance-baseline.mjs",
+    "test:browser-bootstrap": "node scripts/browser-bootstrap-audit.mjs",
+    "test:e2e:live": "node --env-file-if-exists=.env scripts/live-e2e.mjs",
+    "migrate:sqlite": "node scripts/migrate-json-to-sqlite.mjs",
+    "release:package": "node scripts/create-release-package.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "0.468.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "vite": "5.4.19",
+    "vite-plugin-singlefile": "2.3.0"
+  },
+  "devDependencies": {
+    "eslint": "9.35.0",
+    "eslint-plugin-react-hooks": "6.1.0"
+  }
+}

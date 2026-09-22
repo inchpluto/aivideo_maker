@@ -1,0 +1,33 @@
+{
+  "format": "xingmu-delivery-manifest",
+  "version": 1,
+  "projectId": "replace-with-your-project-id",
+  "title": "replace-with-your-project-title",
+  "root": ".",
+  "settings": {
+    "fpsTolerance": 0.02,
+    "durationToleranceSec": 0.5
+  },
+  "artifacts": [
+    { "id": "char-1", "kind": "image", "path": "out/image/char-1-shenzhiyao.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "char-2", "kind": "image", "path": "out/image/char-2-guchuan.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "env-01", "kind": "image", "path": "out/image/env-01-harbor.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "env-02", "kind": "image", "path": "out/image/env-02-breakwater.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "env-03", "kind": "image", "path": "out/image/env-03-lighthouse.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "shot-01", "kind": "image", "path": "out/image/shot-01.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "shot-02", "kind": "image", "path": "out/image/shot-02.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "shot-03", "kind": "image", "path": "out/image/shot-03.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "shot-04", "kind": "image", "path": "out/image/shot-04.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "shot-05", "kind": "image", "path": "out/image/shot-05.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "shot-06", "kind": "image", "path": "out/image/shot-06.png", "expected": { "width": 1280, "height": 720, "codec": "png" } },
+    { "id": "voice-ep1d1", "kind": "audio", "path": "out/audio/voice-ep1d1.wav", "expected": { "sampleRate": 44100, "channels": 1, "codec": "pcm_s16le" } },
+    { "id": "voice-ep1d2", "kind": "audio", "path": "out/audio/voice-ep1d2.wav", "expected": { "sampleRate": 44100, "channels": 1, "codec": "pcm_s16le" } },
+    { "id": "voice-ep1d3", "kind": "audio", "path": "out/audio/voice-ep1d3.wav", "expected": { "sampleRate": 44100, "channels": 1, "codec": "pcm_s16le" } },
+    { "id": "video-01", "kind": "video", "path": "out/video/video-01.mp4", "expected": { "width": 1280, "height": 720, "codec": "h264", "fps": 25, "durationSec": 4, "hasAudio": false } },
+    { "id": "video-02", "kind": "video", "path": "out/video/video-02.mp4", "expected": { "width": 1280, "height": 720, "codec": "h264", "fps": 25, "durationSec": 5, "hasAudio": false } },
+    { "id": "video-03", "kind": "video", "path": "out/video/video-03.mp4", "expected": { "width": 1280, "height": 720, "codec": "h264", "fps": 25, "durationSec": 3, "hasAudio": false } },
+    { "id": "video-04", "kind": "video", "path": "out/video/video-04.mp4", "expected": { "width": 1280, "height": 720, "codec": "h264", "fps": 25, "durationSec": 4, "hasAudio": false } },
+    { "id": "video-05", "kind": "video", "path": "out/video/video-05.mp4", "expected": { "width": 1280, "height": 720, "codec": "h264", "fps": 25, "durationSec": 4, "hasAudio": false } },
+    { "id": "video-06", "kind": "video", "path": "out/video/video-06.mp4", "expected": { "width": 1280, "height": 720, "codec": "h264", "fps": 25, "durationSec": 5, "hasAudio": false } }
+  ]
+}
