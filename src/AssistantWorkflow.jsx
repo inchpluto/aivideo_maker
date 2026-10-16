@@ -1,5 +1,5 @@
 // 混合补全工作台：优先按当前模型路由生成，无法自动执行时保留提示词与回填闭环。
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, CheckCircle2, ChevronDown, Copy, FileText,
   Image as ImageIcon, LoaderCircle, MonitorPlay, Music2, Upload, WandSparkles
@@ -9,6 +9,7 @@ import { compilePromptTask } from '../server/prompts.mjs';
 import { buildProductionPlan } from './productionPlan.js';
 import { CONSISTENCY_MODES } from '../shared/assetPolicy.mjs';
 import { useModelRoute } from './useModelRoute.js';
+import { useProjectOperations } from './useProjectOperations.js';
 import { compileVoicePerformance, voicePayloadFromPerformance } from '../shared/voicePerformance.mjs';
 
 const STAGE_LABEL = { '剧本':'剧本', '人物':'人物', '道具':'道具', '场景':'场景', '声音':'声音', '首帧':'首帧', '视频':'视频', '剪辑':'剪辑' };
@@ -128,53 +129,61 @@ function taskValues(project, task) {
   return {};
 }
 
-export default function AssistantWorkflow({ project, updateProject, notify, onNavigate }) {
+export default function AssistantWorkflow(props) {
+  return <AssistantProjectWorkspace key={props.project?.id || 'no-project'} {...props}/>;
+}
+
+function AssistantProjectWorkspace({ project, updateProject, notify, onNavigate }) {
   const storyRoute = useModelRoute('story');
   const voiceRoute = useModelRoute('voice');
   const plan = useMemo(() => buildProductionPlan(project || {}), [project]);
   const [openId, setOpenId] = useState(plan.tasks[0]?.id || '');
   const [runningId, setRunningId] = useState('');
-  const [promptMap, setPromptMap] = useState({});
+  const beginOperation = useProjectOperations(project?.id);
   const [uploadingId, setUploadingId] = useState('');
   const fileRef = useRef(null);
   const uploadTargetRef = useRef(null);
 
-  const tasks = plan.tasks || [];
+  const tasks = plan.tasks;
   const counts = plan.counts || { text:0, image:0, voice:0, video:0 };
   const consistencyMode = plan.consistencyMode || 'standard';
   const setConsistencyMode = event => updateProject(previous => previous ? { ...previous, workflow:{ ...(previous.workflow || {}), consistencyMode:event.target.value }, updatedAt:new Date().toISOString() } : previous);
 
-  // 打开卡片时预生成提示词（媒体类）
-  const ensurePrompt = async task => {
-    if (promptMap[task.id] || task.costClass === 'text') return;
-    const values = taskValues(project || {}, task);
-    try {
-      const pack = compilePromptTask(task.task, values);
-      setPromptMap(m => ({ ...m, [task.id]: pack.prompt }));
-    } catch { setPromptMap(m => ({ ...m, [task.id]: '（该项目信息不足以生成提示词，请先补全上游文本任务）' })); }
-  };
-  useEffect(() => { if (openId) void ensurePrompt(tasks.find(t=>t.id===openId)); }, [openId, tasks]);
+  // Derive the open prompt from current inputs. Task IDs are reused across
+  // projects, and a same-project edit must invalidate the old prompt as well.
+  const activePrompt = useMemo(() => {
+    const task = tasks.find(item => item.id === openId);
+    if (!task || task.costClass === 'text') return '';
+    try { return compilePromptTask(task.task, taskValues(project || {}, task)).prompt; }
+    catch { return '（该项目信息不足以生成提示词，请先补全上游文本任务）'; }
+  }, [openId, tasks, project]);
 
   // 文本与声音任务按模型中心当前路由执行。
   const runAutomatic = async task => {
-    if (runningId) return;
+    const operation = beginOperation('generation');
+    if (!operation) return;
     setRunningId(task.id);
     const route = task.task === 'voice' ? voiceRoute : storyRoute;
     notify(`${route.label} 正在处理「${task.label}」…`);
     try {
       const payload = taskValues(project || {}, task);
-      const response = await generateTask(task.task, { ...payload, projectId: project?.id }, { route: route.route });
+      const response = await generateTask(task.task, { ...payload, projectId: project?.id }, { route: route.route, signal: operation.signal });
+      if (!operation.isCurrent()) return;
       updateProject(previous => {
-        if (!previous) return previous;
+        if (!operation.isActive() || previous?.id !== operation.projectId) return previous;
         const target = task.task === 'story' ? {} : task.target || {};
         return applyProjectTask(previous, task.task, response, target);
       });
       notify(`已补全「${task.label}」`);
     } catch (error) {
+      if (!operation.isCurrent() || error?.name === 'AbortError') return;
       const msg = String(error?.message || error);
       if (/未配置|PROVIDER|密钥|key/i.test(msg)) notify(`${route.label} 尚不可用：可配置模型，或复制下方提示词手动生成`);
       else notify(`补全失败：${msg}`);
-    } finally { setRunningId(''); }
+    } finally {
+      if (operation.isCurrent()) setRunningId('');
+      operation.finish();
+    }
   };
 
   // 上传媒体回填
@@ -184,14 +193,17 @@ export default function AssistantWorkflow({ project, updateProject, notify, onNa
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || !task || !project) return;
+    const operation = beginOperation('upload');
+    if (!operation) return;
     setUploadingId(task.id);
     try {
       const isImage = task.costClass === 'image';
       const asset = isImage
-        ? await uploadProjectAsset(project.id, file, `fill-${task.task}-${task.target?.shotId || task.target?.characterId || ''}`)
-        : await uploadProjectMedia(project.id, file, `fill-${task.task}-${task.target?.shotId || ''}`);
+        ? await uploadProjectAsset(project.id, file, `fill-${task.task}-${task.target?.shotId || task.target?.characterId || ''}`, { signal: operation.signal })
+        : await uploadProjectMedia(project.id, file, `fill-${task.task}-${task.target?.shotId || ''}`, { signal: operation.signal });
+      if (!operation.isCurrent()) return;
       updateProject(previous => {
-        if (!previous) return previous;
+        if (!operation.isActive() || previous?.id !== operation.projectId) return previous;
         if (isImage) {
           const response = { provider: '手动上传', model: '外部平台', mode: 'manual', result: { imageUrl: asset.url, url: asset.url } };
           return applyProjectTask(previous, task.task, response, task.target || {});
@@ -207,8 +219,12 @@ export default function AssistantWorkflow({ project, updateProject, notify, onNa
         return previous;
       });
       notify(`「${task.label}」已回填，请继续下一步`);
-    } catch (error) { notify(`回填失败：${error.message || error}`); }
-    finally { setUploadingId(''); uploadTargetRef.current = null; }
+    } catch (error) {
+      if (operation.isCurrent() && error?.name !== 'AbortError') notify(`回填失败：${error.message || error}`);
+    } finally {
+      if (operation.isCurrent()) { setUploadingId(''); uploadTargetRef.current = null; }
+      operation.finish();
+    }
   };
 
   return (
@@ -261,10 +277,10 @@ export default function AssistantWorkflow({ project, updateProject, notify, onNa
           const open = openId === task.id;
           const running = runningId === task.id;
           const uploading = uploadingId === task.id;
-          const prompt = promptMap[task.id];
+          const prompt = open ? activePrompt : '';
           return (
             <article key={task.id} className={`assistant-task ${open ? 'open' : ''} ${task.costClass}`}>
-              <button className="assistant-task-head" onClick={() => { setOpenId(open ? '' : task.id); if (!open && !isText) void ensurePrompt(task); }}>
+              <button className="assistant-task-head" onClick={() => setOpenId(open ? '' : task.id)}>
                 <span className="task-index">{index + 1}</span>
                 <span className={`task-icon ${task.costClass}`}><Icon size={18}/></span>
                 <div className="task-title"><b>{task.label}</b><span>{meta.label}</span></div>
@@ -285,10 +301,20 @@ export default function AssistantWorkflow({ project, updateProject, notify, onNa
                     <>
                       <div className="assistant-actions">
                         {isVoice&&<button className="primary" disabled={!!runningId} onClick={() => runAutomatic(task)}>{running?<><LoaderCircle className="spin" size={15}/> 合成中…</>:<><WandSparkles size={15}/> 用 {activeRoute.selected?.name} 合成</>}</button>}
-                        <button className="outline" onClick={() => { navigator.clipboard?.writeText(prompt || ''); notify('提示词已复制，去免费平台生成'); }}>
+                        <button className="outline" onClick={async () => {
+                          const operation = beginOperation('clipboard');
+                          if (!operation) return;
+                          try {
+                            if (!navigator.clipboard?.writeText) throw new Error('浏览器不支持剪贴板，请手动选择提示词复制');
+                            await navigator.clipboard.writeText(prompt || '');
+                            if (operation.isCurrent()) notify('提示词已复制，去免费平台生成');
+                          } catch (error) {
+                            if (operation.isCurrent()) notify(`复制失败：${error.message || error}`);
+                          } finally { operation.finish(); }
+                        }}>
                           <Copy size={15}/> 复制提示词
                         </button>
-                        <button className="primary" disabled={uploading} onClick={() => pickUpload(task)}>
+                        <button className="primary" disabled={!!uploadingId} onClick={() => pickUpload(task)}>
                           {uploading ? <><LoaderCircle className="spin" size={15}/> 上传中…</> : <><Upload size={15}/> 上传回填</>}
                         </button>
                       </div>

@@ -9,7 +9,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const dataDir=await mkdtemp(path.join(os.tmpdir(),'xingmu-package-http-'));
 const port=48000+Math.floor(Math.random()*1000);
 const base=`http://127.0.0.1:${port}`;
-const child=spawn(process.execPath,['server/index.mjs'],{cwd:root,env:{...process.env,DATA_DIR:dataDir,PORT:String(port),INDEX_TTS_AUTOSTART:'false'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['server/index.mjs'],{cwd:root,env:{...process.env,DATA_DIR:dataDir,PORT:String(port),LOCAL_TTS_AUTOSTART:'false'},stdio:['ignore','pipe','pipe']});
 let output='';child.stdout.on('data',chunk=>{output+=chunk});child.stderr.on('data',chunk=>{output+=chunk});
 child.on('error',error=>{output+=` ${error.message}`});
 const waitForServer=async()=>{const deadline=Date.now()+10_000;while(Date.now()<deadline){try{const response=await fetch(`${base}/api/health`);if(response.ok)return}catch{}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`服务未启动：${output.slice(-1000)}`)};
@@ -21,7 +21,7 @@ try{
   const saved=await request(`/api/projects/${projectId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(project)});assert.equal(saved.response.status,200);
   project.revision=saved.body.project.revision;
   const pngFixture=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
-  const asset=await request(`/api/assets/media?projectId=${projectId}&kind=reference`,{method:'POST',headers:{'Content-Type':'image/png'},body:pngFixture});assert.equal(asset.response.status,201);assert.ok(asset.body.asset?.url);
+  const asset=await request(`/api/assets/media?projectId=${projectId}&kind=reference`,{method:'POST',headers:{'Content-Type':'image/png'},body:pngFixture});assert.equal(asset.response.status,201,JSON.stringify(asset.body));assert.ok(asset.body.asset?.url);
   project.assets.localMedia=[{id:'fixture-asset',name:'fixture.png',kind:'image',url:asset.body.asset.url}];
   const updated=await request(`/api/projects/${projectId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(project)});assert.equal(updated.response.status,200);
   const packageResponse=await request(`/api/projects/${projectId}/package`);assert.equal(packageResponse.response.status,200);assert.match(packageResponse.response.headers.get('content-type')||'',/application\/zip/);assert.ok(packageResponse.body.length>100);

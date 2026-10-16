@@ -53,8 +53,8 @@ export default function FreeformCanvas({project,onChange,onSwitchProduction,noti
    useEffect(()=>{const incoming=project?.canvas?.creative?.nodes?synchronizeCanvasAssetNodes(project,project.canvas.creative):null;if(incoming&&incoming===creativeRef.current)return;const next={...(incoming||seedCreative(project)),projectId:project?.id};creativeRef.current=next;setCreative(next);setSelectedId(next.nodes[0]?.id||'');setConnecting('');setWireDraft(null);setZoom(next.viewport?.zoom||90);requestAnimationFrame(()=>{if(stageRef.current){stageRef.current.scrollLeft=next.viewport?.scrollLeft||0;stageRef.current.scrollTop=next.viewport?.scrollTop||0}});if(!incoming)onChange?.(next)},[project?.id,project?.canvas?.creative,project?.assetVersionState?.syncedAt]);
   useEffect(()=>()=>window.clearTimeout(saveTimer.current),[]);
 
-  const nodes=creative.nodes||[];
-  const edges=creative.edges||[];
+  const nodes=useMemo(()=>creative.nodes||[],[creative.nodes]);
+  const edges=useMemo(()=>creative.edges||[],[creative.edges]);
   const byId=useMemo(()=>new Map(nodes.map(node=>[node.id,node])),[nodes]);
   const selected=byId.get(selectedId);
   const shots=project?.shots||[];

@@ -75,9 +75,12 @@ export const providerCatalog = Object.fromEntries(Object.entries(modelOptions).m
   return [task, { label: group.label, fallback: group.fallback, provider: active.provider, model: active.name }];
 }));
 
+// Preserve current-tab selections when storage is blocked or over quota.
+let volatilePreferences = null;
+
 export function getModelPreferences() {
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem('xingmu-model-routes')) || {}; } catch { saved = {}; }
+  try { saved = volatilePreferences || JSON.parse(localStorage.getItem('xingmu-model-routes')) || {}; } catch { saved = {}; }
   return Object.fromEntries(Object.entries(modelOptions).map(([task, group]) => [task, group.options.some(item => item.id === saved[task]) ? saved[task] : group.recommended]));
 }
 
@@ -86,7 +89,12 @@ export function getModelSelection(task) {
 }
 
 export function saveModelPreferences(preferences) {
-  localStorage.setItem('xingmu-model-routes', JSON.stringify(preferences));
+  volatilePreferences = { ...preferences };
+  try {
+    localStorage.setItem('xingmu-model-routes', JSON.stringify(preferences));
+    volatilePreferences = null;
+    return true;
+  } catch { return false; }
 }
 
 export function selectedModelLabel(task) {

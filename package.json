@@ -1,11 +1,11 @@
 {
   "name": "xingmu-ai-studio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "packageManager": "pnpm@11.19.0",
   "engines": {
-    "node": ">=20.19.0 <25"
+    "node": ">=22.13.0 <25"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -17,16 +17,16 @@
     "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",
     "check": "node scripts/check.mjs",
     "lint": "node scripts/lint.mjs",
-    "test": "pnpm check",
+    "test": "pnpm validate",
     "test:prompts": "node scripts/prompt-contract-audit.mjs",
     "test:plan": "node scripts/production-plan-audit.mjs",
     "test:motion": "node scripts/motion-contract-audit.mjs",
     "test:editing": "node scripts/editing-plan-audit.mjs",
     "test:context": "node scripts/creative-context-audit.mjs",
     "test:models": "node scripts/model-route-audit.mjs",
-  "test:voices": "node scripts/voice-library-audit.mjs",
-  "test:tts-provider": "node scripts/local-tts-provider-audit.mjs",
-  "test:local-v1": "node scripts/local-v1-acceptance-audit.mjs",
+    "test:voices": "node scripts/voice-library-audit.mjs",
+    "test:tts-provider": "node scripts/local-tts-provider-audit.mjs",
+    "test:local-v1": "node scripts/local-v1-acceptance-audit.mjs",
     "test:upload-cancel": "node scripts/media-upload-cancel-audit.mjs",
     "test:caption-http": "node scripts/caption-export-http-audit.mjs",
     "test:request-diagnostics": "node scripts/request-error-diagnostics-audit.mjs",
@@ -46,17 +46,23 @@
     "test:browser-bootstrap": "node scripts/browser-bootstrap-audit.mjs",
     "test:e2e:live": "node --env-file-if-exists=.env scripts/live-e2e.mjs",
     "migrate:sqlite": "node scripts/migrate-json-to-sqlite.mjs",
-    "release:package": "node scripts/create-release-package.mjs"
+    "release:package": "node --env-file-if-exists=.env scripts/create-release-package.mjs",
+    "validate": "pnpm version:check && pnpm lint && pnpm build && pnpm check && pnpm test:performance",
+    "version:check": "node scripts/version-check.mjs",
+    "test:regressions": "node scripts/http-transport-audit.mjs && node scripts/release-safety-audit.mjs && node scripts/performance-budget-audit.mjs && pnpm test:frontend",
+    "test:frontend": "node scripts/frontend-lifecycle-audit.mjs"
   },
   "dependencies": {
     "lucide-react": "0.468.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "vite": "5.4.19",
-    "vite-plugin-singlefile": "2.3.0"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "esbuild": "0.25.12",
     "eslint": "9.35.0",
-    "eslint-plugin-react-hooks": "6.1.0"
+    "eslint-plugin-react-hooks": "6.1.0",
+    "react-test-renderer": "18.3.1",
+    "vite": "6.4.4",
+    "vite-plugin-singlefile": "2.3.0"
   }
 }

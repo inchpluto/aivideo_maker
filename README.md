@@ -1,5 +1,7 @@
 # 星幕 · AI 影像创作工作台
 
+当前代码版本：**0.2.1** · [变更日志](./CHANGELOG.md) · [版本与发布流程](./docs/VERSIONING.md) · [安全边界](./SECURITY.md)
+
 面向 AI 短剧、AI 视频和 AI 漫剧的全流程创作平台。当前版本已经把小说导入、剧本改编、角色与声音、分镜设计、素材生成、可撤销剪辑和项目导出串成同一份项目数据。
 
 ## 已实现闭环
@@ -22,8 +24,11 @@
 
 ## 运行
 
+使用 Node **22.13–24.x**（推荐 `.node-version` 中的 22.22.3）和 pnpm **11.19.0**。真实成片与全量审计需要 FFmpeg / FFprobe（推荐 FFmpeg 5+，包含 `libx264` 与 `subtitles` 滤镜）。没有媒体工具仍可启动编辑，但不能导出真实 MP4，`doctor` 会报告缺失项。
+
 ```bash
-pnpm install
+npm install -g pnpm@11.19.0
+pnpm install --frozen-lockfile
 pnpm run doctor
 pnpm build
 pnpm start
@@ -31,15 +36,23 @@ pnpm start
 
 打开 `http://127.0.0.1:4174`。`pnpm start` 会同时提供生产前端和 `/api/*` 编排接口。
 
-前端开发：
+前后端开发需分别开启两个终端：
 
 ```bash
+# 终端 1：本地 API 服务（默认端口 4174）
+pnpm server
+
+# 终端 2：Vite 热更新前端
 pnpm dev
 ```
+
+浏览器打开 Vite 输出的地址；前端始终使用相对 `/api` 路径，由 Vite 代理到本机 4174 端口。若自定义后端端口，请同时调整 `vite.config.js` 中的代理目标。服务是本机单用户工具，勿直接暴露到公网。
 
 `pnpm run doctor` 会检查 Node/pnpm、FFmpeg/FFprobe、`libx264`、字幕滤镜、端口、数据目录权限、磁盘空间和可选 TTS 状态。TTS 未安装或未启动不会阻断编辑；FFmpeg/FFprobe 缺失时服务仍可启动，但“导出真实 MP4”会在导出前显示安装或路径配置原因并阻止提交。
 
 项目设置支持 `16:9`、`9:16`、`1:1` 和 `24/25/30fps`；渲染会保留时间线空隙、源入点与播放速度，重叠或不支持的输出规格会在成片前明确拒绝。
+
+语音库打开或切换本地模型时只读取状态，点击“启动服务”才启动本地 TTS；服务端 `.env` 显式启用 `LOCAL_TTS_AUTOSTART=true` 的行为不变。切换项目会取消智能补全工作台的客户端请求并忽略过期回填，但不保证供应商已停止执行／计费。
 
 ### 无云密钥的本地闭环
 
@@ -49,7 +62,7 @@ pnpm dev
 
 默认数据目录为 `server/data/`；生产使用建议在 `.env` 设置独立的绝对 `DATA_DIR`，这样移动或替换代码目录不会覆盖项目、媒体、任务和备份。升级前先运行项目备份入口或复制该数据目录；升级失败时停止服务、恢复旧代码并保留同一 `DATA_DIR`，再运行 `pnpm run doctor` 和 `pnpm start` 验证回退。
 
-需要 SQLite 生产存储时使用 Node 22.5+，先在服务停止状态执行一次干运行和迁移：
+需要 SQLite 生产存储时使用上述支持的 Node 版本，先在服务停止状态执行一次干运行和迁移：
 
 ```bash
 pnpm migrate:sqlite
@@ -61,7 +74,9 @@ pnpm migrate:sqlite -- --apply
 模型接入：
 
 ```bash
-copy .env.example .env
+# macOS / Linux
+cp .env.example .env
+# Windows PowerShell 使用：Copy-Item .env.example .env
 pnpm start
 ```
 
@@ -84,13 +99,26 @@ pnpm test:e2e:live
 ### 生成可分享源码发布包
 
 ```bash
-pnpm release:package -- --output C:\\path\\to\\xingmu-release
+pnpm release:package -- --output release/xingmu-0.2.1
 ```
 
-发布包生成器拒绝覆盖已有目录，并排除 `node_modules`、构建产物、`.env`（保留 `.env.example`）、`server/data`、历史基线、缓存、日志、临时文件和本地工具产物；生成 `release-manifest.json` 记录文件数量、字节数和 SHA-256。需要将已构建的 `dist/` 一并带出时追加 `--include-dist`。发布包接收方按上面的安装、`doctor`、`build`、`start` 步骤验证，不携带用户项目或供应商凭据。
+发布包生成器拒绝覆盖已有目录，并排除 `node_modules`、构建产物、`.env`（保留 `.env.example`）、`server/data`、历史基线、缓存、日志、临时文件和本地工具产物；生成 `release-manifest.json` 记录应用版本、Git commit / dirty、文件数量、字节数和 SHA-256。打包会读取 `.env` 的 `DATA_DIR` 并排除该目录，拒绝符号链接与已有输出；失败只清理本次新建的输出。需要将已构建的 `dist/` 一并带出时追加 `--include-dist`。发布包接收方按上面的安装、`doctor`、`build`、`start` 步骤验证，不携带用户项目或供应商凭据。
 
 真实 MP4 合成使用项目中已通过真实性探测的本地媒体和 FFmpeg；不需要云端模型授权，也不会把模拟进度伪装成 MP4。没有可验证的本地画面、FFmpeg/FFprobe 或字幕滤镜时，服务端和导出界面都会返回结构化阻断原因。Runway 实时适配器已同时支持文生视频和图生视频，不再强制要求首帧 URL。
 
-当前发布验收见 [docs/RELEASE_ACCEPTANCE_2026-09-08.md](./docs/RELEASE_ACCEPTANCE_2026-09-08.md)；历史验证结果见 [QA_REPORT.md](./QA_REPORT.md)，调研依据见 [RESEARCH.md](./RESEARCH.md)。
+本轮可重复验证见 [docs/RELEASE_ACCEPTANCE_0.2.1.md](./docs/RELEASE_ACCEPTANCE_0.2.1.md)；历史发布验收见 [docs/RELEASE_ACCEPTANCE_2026-09-08.md](./docs/RELEASE_ACCEPTANCE_2026-09-08.md)，历史验证结果见 [QA_REPORT.md](./QA_REPORT.md)，调研依据见 [RESEARCH.md](./RESEARCH.md)。
 
 可直接导入的验收案例位于 [examples/雾港来信.txt](./examples/雾港来信.txt)，界面中的“填入案例小说”使用相同内容。
+
+## 开发质量门禁
+
+```bash
+pnpm test                 # 版本检查、lint、构建、离线审计、首屏 gzip 预算
+pnpm test:regressions      # HTTP／发布／前端回归；不需要 FFmpeg
+pnpm test:frontend         # 真实 React 挂载的异步生命周期回归
+pnpm build:demo           # 单文件演示构建
+pnpm version:check         # 应用版本与变更日志一致性
+pnpm audit                # 完整依赖安全审计（已知构建依赖告警见 SECURITY.md）
+```
+
+全量测试使用隔离临时目录和本地合成媒体，不调用付费模型。`pnpm check` 是需预先构建的底层入口，干净安装后建议用 `pnpm test`。GitHub Actions 已配置 Linux / Node 22、24 门禁。现有 20 条 Hooks 警告和真实外部供应商／完整浏览器／Windows 安装器的未验证边界仍保留，不因离线测试通过而宣称全部完成。

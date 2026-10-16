@@ -1,8 +1,6 @@
 import http from 'node:http';
 import { mkdir, open, readFile, rename, stat, statfs, unlink, writeFile } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { analyzeNovelText, applyScreenplay, partitionImportedEpisodes } from './workflow.mjs';
@@ -29,6 +27,9 @@ import { createDiagnostics } from './diagnostics.mjs';
 import { createDiagnosticsPackage } from './diagnosticPackage.mjs';
 import { withFileLock } from './fileCoordinator.mjs';
 import { buildSrt, captionItemsFromTimeline } from '../src/captionExport.js';
+import { sendFile, sendMediaFile } from './httpFiles.mjs';
+import { readJsonBody as body } from './httpBody.mjs';
+import { APP_VERSION } from './version.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -80,7 +81,6 @@ function sanitizeErrorMessage(message) {
   return text || '请求失败。';
 }
 
-const body = req => new Promise((resolve, reject) => { let raw = ''; let oversized = Number(req.headers['content-length'] || 0) > 12_000_000; if (oversized) { const error = new Error('请求内容过大'); error.code = 'REQUEST_TOO_LARGE'; reject(error); req.resume(); return; } req.on('data', chunk => { if (oversized) return; raw += chunk; if (raw.length > 12_000_000) { oversized = true; const error = new Error('请求内容过大'); error.code = 'REQUEST_TOO_LARGE'; reject(error); } }); req.on('end', () => { if (!oversized) { try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('JSON 格式无效')); } } }); req.on('error', error => { if (!oversized) reject(error); }); });
 const binaryBody = (req, limit = 250_000_000) => new Promise((resolve, reject) => { const chunks = []; let size = 0; let failed = false; const label = limit >= 1_000_000 ? `${Math.round(limit / 1_000_000)}MB` : `${limit} bytes`; const declared = Number(req.headers['content-length'] || 0); if (Number.isFinite(declared) && declared > limit) { failed = true; req.resume(); const error = new Error(`请求内容超过 ${label}。`); error.code = 'MEDIA_TOO_LARGE'; reject(error); return; } req.on('data', chunk => { if (failed) return; size += chunk.length; if (size > limit) { failed = true; const error = new Error(`请求内容超过 ${label}。`); error.code = 'MEDIA_TOO_LARGE'; reject(error); return; } chunks.push(chunk); }); req.on('end', () => { if (!failed) resolve(Buffer.concat(chunks)); }); req.on('error', reject); });
 async function ensureFreeSpace(requiredBytes, reserveBytes = 0) {
   const required = Math.max(0, Number(requiredBytes) || 0); const reserve = Math.max(0, Number(reserveBytes) || 0);
@@ -166,8 +166,6 @@ async function materialize(result, projectId = 'shared', kind = 'asset') {
   return output;
 }
 const generationWorker = createTaskWorker({ limits:{ default:Number(process.env.GENERATION_CONCURRENCY||2), video:1, voice:1, render:1 }, budget:{ maxTasks:process.env.GENERATION_MAX_TASKS?Number(process.env.GENERATION_MAX_TASKS):Number.POSITIVE_INFINITY, maxCalls:process.env.GENERATION_MAX_CALLS?Number(process.env.GENERATION_MAX_CALLS):Number.POSITIVE_INFINITY, maxMediaSeconds:process.env.GENERATION_MAX_MEDIA_SECONDS?Number(process.env.GENERATION_MAX_MEDIA_SECONDS):Number.POSITIVE_INFINITY }, execute:async (item)=>materialize(item.task==='story'&&item.payload?.stagedStory?await runStagedStory(item.payload,item.route,{completedResults:item.stageResults||[],onChunk:async ({results,coveredChunkIds,index,total})=>saveGenerationJob({id:item.id,stage:`story-chunk-${index+1}-of-${total}`,coveredChunkIds,stageResults:results})}):await runProvider(item.task,item.payload,item.route),item.projectId,item.task), reconcile:async (item)=>materialize({ ok:true, mode:'live', task:item.task, result:await pollProviderTask(item.providerTaskId,item.route), providerTaskId:item.providerTaskId },item.projectId,item.task) });
-const compressible = new Set(['text/html', 'text/javascript', 'application/javascript', 'text/css', 'image/svg+xml', 'application/json']);
-const isCompressible = mimeType => { const base = String(mimeType).split(';')[0].trim(); return compressible.has(base); };
 
 const publicRenderJob = job => {
   if (!job) return job;
@@ -239,41 +237,14 @@ async function diagnosticMetrics() {
   };
 }
 
-// 对可压缩文本启用 gzip（仅当客户端 Accept-Encoding 声明支持 gzip）。
-function sendFile(req, res, mimeType, buffer) {
-  if (buffer.length >= 1024 && isCompressible(mimeType) && /gzip/.test(req.headers['accept-encoding'] || '')) {
-    res.writeHead(200, { 'Content-Type': mimeType, 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' });
-    res.end(zlib.gzipSync(buffer));
-  } else {
-    res.writeHead(200, { 'Content-Type': mimeType });
-    res.end(buffer);
-  }
-}
-
-async function sendMediaFile(req, res, file, contentType) {
-  const info = await stat(file).catch(() => null);
-  if (!info?.isFile()) throw Object.assign(new Error('媒体文件不存在。'), { code: 'ENOENT' });
-  const size = info.size;
-  const range = String(req.headers.range || '');
-  const headers = { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' };
-  if (!range) {
-    res.writeHead(200, { ...headers, 'Content-Length': size });
-    if (req.method === 'HEAD') return res.end();
-    return createReadStream(file).pipe(res);
-  }
-  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-  if (!match || (!match[1] && !match[2])) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
-  let start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-  let end = match[2] ? Number(match[2]) : size - 1;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
-  end = Math.min(end, size - 1);
-  res.writeHead(206, { ...headers, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}` });
-  if (req.method === 'HEAD') return res.end();
-  return createReadStream(file, { start, end }).pipe(res);
-}
-
 async function staticFile(req, res) {
-  const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, HEAD');
+    return json(res, 405, { error: '静态资源仅支持 GET / HEAD。', code: 'METHOD_NOT_ALLOWED' });
+  }
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
+  catch { throw Object.assign(new Error('请求路径编码无效。'), { code: 'INVALID_REQUEST_URL' }); }
   const publicAssets = path.join(root, 'assets');
   const isWorkspaceAsset = pathname.startsWith('/assets/');
   const candidates = pathname === '/'
@@ -287,17 +258,21 @@ async function staticFile(req, res) {
     try {
       const info = await stat(candidate);
       const file = info.isDirectory() ? path.join(candidate, 'index.html') : candidate;
-      sendFile(req, res, mime[path.extname(file)] || 'application/octet-stream', await readFile(file));
+      await sendFile(req, res, mime[path.extname(file)] || 'application/octet-stream', await readFile(file));
       return;
     } catch { /* 尝试下一个安全候选路径 */ }
   }
-  try { sendFile(req, res, 'text/html; charset=utf-8', await readFile(path.join(dist, 'index.html'))); } catch { json(res, 404, { error: '请先运行 npm run build' }); }
+  // A missing JS/CSS/media file must not receive HTML with a success status.
+  if (isWorkspaceAsset || path.extname(pathname)) return json(res, 404, { error: '静态资源不存在。', code: 'STATIC_FILE_NOT_FOUND' });
+  try { await sendFile(req, res, 'text/html; charset=utf-8', await readFile(path.join(dist, 'index.html'))); } catch { json(res, 404, { error: '请先运行 pnpm build' }); }
 }
 
 const server = http.createServer(async (req, res) => {
   const requestId = diagnostics.requestId();
   const startedAt = Date.now();
-  const url = new URL(req.url, 'http://localhost');
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { return json(res, 400, { error: '请求地址无效。', code: 'INVALID_REQUEST_URL' }); }
   res.setHeader('X-Request-Id', requestId);
   res.on('finish', () => {
     const projectMatch = url.pathname.match(/\/projects\/([^/]+)/);
@@ -325,7 +300,7 @@ const server = http.createServer(async (req, res) => {
       const verified = providerStates.filter(item => item.verified).length;
       const mode = config.liveMode === false ? 'demo' : verified > 0 ? 'live' : configured > 0 ? 'configured-unverified' : 'manual';
       const productionTasks=workflowAudit.tasks.filter(item=>item.task!=='review');const readyTasks=productionTasks.filter(item=>item.credentialVerified).length;const manualTasks=productionTasks.filter(item=>item.manualOnly).length;
-      return json(res, 200, { ok: true, service: 'xingmu-orchestrator', mode, strictMode: config.liveMode !== false, generationReady: workflowAudit.readyForLive, partialGenerationReady: verified > 0, manualFallbackReady: workflowAudit.manualFallbackComplete, taskReadiness:{ready:readyTasks,manual:manualTasks,total:productionTasks.length}, providers: { configured, verified, total: providerStates.length }, render: await getRenderCapabilities(), time: new Date().toISOString() });
+      return json(res, 200, { ok: true, service: 'xingmu-orchestrator', version: APP_VERSION, mode, strictMode: config.liveMode !== false, generationReady: workflowAudit.readyForLive, partialGenerationReady: verified > 0, manualFallbackReady: workflowAudit.manualFallbackComplete, taskReadiness:{ready:readyTasks,manual:manualTasks,total:productionTasks.length}, providers: { configured, verified, total: providerStates.length }, render: await getRenderCapabilities(), time: new Date().toISOString() });
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics') return json(res, 200, { ok: true, schemaVersion: 1, generatedAt: new Date().toISOString(), metrics: await diagnosticMetrics(), recent: diagnostics.recent() });
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/export') {
@@ -455,11 +430,28 @@ const server = http.createServer(async (req, res) => {
       try { for await(const chunk of packaged.stream()){if(res.destroyed)break;if(!res.write(chunk))await new Promise(resolve=>res.once('drain',resolve));} } finally { if(!res.writableEnded&&!res.destroyed)res.end(); }
       return;
     }
-    if(req.method==='POST'&&url.pathname==='/api/projects/package/inspect'){
-      const temporary=path.join(dataRoot,`.package-${Date.now()}-${Math.random().toString(36).slice(2,8)}.part`); try { await receiveBinaryFile(req,temporary,packageUploadLimit,{reserveBytes:packageDiskReserve}); const inspected=await inspectProjectPackageFile(temporary); return json(res,200,{ok:true,legacy:inspected.legacy,manifest:inspected.manifest,preflight:inspected.preflight}); } finally { await unlink(temporary).catch(()=>undefined); }
+    if (req.method === 'POST' && url.pathname === '/api/projects/package/inspect') {
+      const temporary = path.join(dataRoot, `.package-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.part`);
+      let inspected;
+      try {
+        await receiveBinaryFile(req, temporary, packageUploadLimit, { reserveBytes: packageDiskReserve });
+        inspected = await inspectProjectPackageFile(temporary);
+      } finally { await unlink(temporary).catch(() => undefined); }
+      return json(res, 200, { ok: true, legacy: inspected.legacy, manifest: inspected.manifest, preflight: inspected.preflight });
     }
-    if(req.method==='POST'&&url.pathname==='/api/projects/package/import'){
-      const temporary=path.join(dataRoot,`.package-${Date.now()}-${Math.random().toString(36).slice(2,8)}.part`); try { await receiveBinaryFile(req,temporary,packageUploadLimit,{reserveBytes:packageDiskReserve}); const imported=await importProjectPackage({inputPath:temporary,dataDir:dataRoot,allowMissing:url.searchParams.get('allowMissing')==='true',conflict:url.searchParams.get('conflict')||'copy',existingProjectIds:(await listProjects()).map(project=>project.id)}); if(isSqliteStorage()){imported.project=await saveProject(imported.project); imported.assets=await Promise.all((imported.assets||[]).map(asset=>registerImportedFileAsset({file:path.join(dataRoot,'assets',imported.projectId,asset.name),projectId:imported.projectId,kind:asset.kind,assetId:asset.assetId})));} return json(res,201,{ok:true,imported}); } finally { await unlink(temporary).catch(()=>undefined); }
+    if (req.method === 'POST' && url.pathname === '/api/projects/package/import') {
+      const temporary = path.join(dataRoot, `.package-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.part`);
+      let imported;
+      try {
+        await receiveBinaryFile(req, temporary, packageUploadLimit, { reserveBytes: packageDiskReserve });
+        imported = await importProjectPackage({ inputPath: temporary, dataDir: dataRoot, allowMissing: url.searchParams.get('allowMissing') === 'true', conflict: url.searchParams.get('conflict') || 'copy', existingProjectIds: (await listProjects()).map(project => project.id) });
+        if (isSqliteStorage()) {
+          imported.project = await saveProject(imported.project);
+          imported.assets = await Promise.all((imported.assets || []).map(asset => registerImportedFileAsset({ file: path.join(dataRoot, 'assets', imported.projectId, asset.name), projectId: imported.projectId, kind: asset.kind, assetId: asset.assetId })));
+        }
+      } finally { await unlink(temporary).catch(() => undefined); }
+      // Success means temporary upload cleanup has completed, not just begun.
+      return json(res, 201, { ok: true, imported });
     }
     if(req.method==='POST'&&url.pathname==='/api/maintenance/cleanup'){
       const input=await body(req);const projects=await listProjects();const projectDocuments=await Promise.all(projects.map(project=>readProject(project.id).catch(()=>null)));const jobs=await listGenerationJobs();const activeJobProjects=jobs.filter(job=>!['SUCCEEDED','FAILED','CANCELLED','needs_reconcile','awaiting_budget'].includes(job.status)).map(job=>job.projectId);const plan=await previewCacheCleanup({dataDir:dataRoot,maxAgeMs:Number(input.maxAgeMs)||24*60*60*1000,projectIds:[...projects.map(project=>project.id),...activeJobProjects],projectDocuments});const result=input.apply===true?await applyCacheCleanup(plan,{dryRun:false}):plan;return json(res,200,{ok:true,applied:result.applied===true,cleanup:result});
@@ -599,8 +591,15 @@ const server = http.createServer(async (req, res) => {
       return await sendMediaFile(req, res, file, 'video/mp4');
     }
     if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'API 路由不存在' });
-    return staticFile(req, res);
+    return await staticFile(req, res);
   } catch (error) {
+    // A failed/aborted stream has already started its response. Never write a
+    // second set of headers; terminate it without crashing other requests.
+    if (res.headersSent || res.destroyed) {
+      res.__xingmuErrorCode = error?.code || 'STREAM_FAILED';
+      res.destroy();
+      return;
+    }
     // 完整错误仅写服务端日志，前端只收到脱敏后的摘要；请求上下文用于定位偶发尾请求。
     const errorCode = error?.code || 'REQUEST_FAILED';
     res.__xingmuErrorCode = errorCode;

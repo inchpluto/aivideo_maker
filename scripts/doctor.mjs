@@ -46,11 +46,11 @@ const data = await writableDirectory().catch(error => ({ error:error.message || 
 const packageManager = process.platform === 'win32' ? run(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'pnpm', '--version']) : run('pnpm', ['--version']);
 const lockfile = await import('node:fs/promises').then(({ access }) => access(path.join(root, 'pnpm-lock.yaml')).then(() => true).catch(() => false));
 const report = {
-  ok: nodeMajor >= 20 && nodeMajor < 25 && (nodeMajor > 20 || nodeMinor >= 19) && packageManager.ok && lockfile && !data.error && ffmpeg.ok && ffprobe.ok && /\blibx264\b/i.test(ffmpegFeatures.output),
+  ok: nodeMajor >= 22 && nodeMajor < 25 && (nodeMajor > 22 || nodeMinor >= 13) && packageManager.ok && lockfile && !data.error && ffmpeg.ok && ffprobe.ok && /\blibx264\b/i.test(ffmpegFeatures.output),
   root,
   dataDir,
   checks: {
-    node: { ok:nodeMajor >= 20 && nodeMajor < 25 && (nodeMajor > 20 || nodeMinor >= 19), version:process.versions.node, required:'20.19–24.x' },
+    node: { ok:nodeMajor >= 22 && nodeMajor < 25 && (nodeMajor > 22 || nodeMinor >= 13), version:process.versions.node, required:'22.13–24.x' },
     packageManager: { ok:packageManager.ok, version:packageManager.output.split(/\s+/)[0] || '', required:'pnpm' },
     lockfile: { ok:lockfile, file:'pnpm-lock.yaml' },
     port: { ok:await portFree(), value:port },
