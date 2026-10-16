@@ -364,12 +364,27 @@ export async function deleteServerProject(id) {
   return response.json();
 }
 
-export async function uploadProjectAsset(projectId, file, kind='reference') {
+export async function uploadProjectAsset(projectId, file, kind='reference', { signal } = {}) {
   if(!file)throw new Error('请选择素材文件。');
   if(file.size>8_000_000)throw new Error('素材请控制在 8MB 以内。');
-  const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('读取素材失败。'));reader.readAsDataURL(file)});
+  const abortError = () => signal?.reason || Object.assign(new Error('素材上传已取消。'), { name: 'AbortError' });
+  if (signal?.aborted) throw abortError();
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    const cleanup = () => {
+      signal?.removeEventListener('abort', cancel);
+      reader.onload = reader.onerror = reader.onabort = null;
+    };
+    const cancel = () => { cleanup(); reader.abort(); reject(abortError()); };
+    reader.onload = () => { cleanup(); resolve(reader.result); };
+    reader.onerror = () => { cleanup(); reject(new Error('读取素材失败。')); };
+    reader.onabort = () => { cleanup(); reject(abortError()); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    try { reader.readAsDataURL(file); } catch (error) { cleanup(); reject(error); }
+  });
+  if (signal?.aborted) throw abortError();
   const base64=String(dataUrl).split(',')[1];
-  const response=await fetch('/api/assets/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId,kind,contentType:file.type||'application/octet-stream',base64})});
+  const response=await fetch('/api/assets/upload',{signal,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId,kind,contentType:file.type||'application/octet-stream',base64})});
   if(!response.ok){const detail=await response.json().catch(()=>({}));throw new Error(detail.error || '上传素材失败。')}
   return (await response.json()).asset;
 }
@@ -383,8 +398,8 @@ export async function uploadProjectMedia(projectId, file, kind='local-media', op
   throw new Error('媒体上传未返回已入库资产。');
 }
 
-export async function listVoicePacks() {
-  const response=await fetch('/api/voices');
+export async function listVoicePacks({ signal } = {}) {
+  const response=await fetch('/api/voices', { signal });
   if(!response.ok)throw new Error('读取语音库失败。');
   return response.json();
 }

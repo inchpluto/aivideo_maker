@@ -47,7 +47,7 @@ try {
   const oversized = await request('/api/assets/media?projectId=input-defense&kind=oversized', { method: 'POST', headers: { 'Content-Type': 'video/mp4' }, body: Buffer.alloc(10001) });
   assert.equal(oversized.status, 413); assert.equal(json(oversized).code, 'MEDIA_TOO_LARGE');
   const malformed = await request('/api/projects/input-defense', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Content-Length': '1' }, body: Buffer.from('{') });
-  assert.equal(malformed.status, 400); assert.equal(json(malformed).code, 'REQUEST_FAILED');
+  assert.equal(malformed.status, 400); assert.equal(json(malformed).code, 'INVALID_JSON');
   const traversal = await request('/api/assets/input-defense/%2e%2e%2finput-defense.json');
   assert.notEqual(traversal.status, 200);
   const partial = await request(asset.url, { headers: { Range: 'bytes=0-15' } });

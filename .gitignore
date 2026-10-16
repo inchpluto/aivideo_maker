@@ -30,3 +30,11 @@ node_modules/
 *.corrupted.bak
 *.reversed-check
 *.recovered
+
+# Release / QA artifacts (never commit generated packages or test data)
+release/
+artifacts/
+coverage/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Check, CheckCircle2, FileAudio, LoaderCircle, Mic2, Pause, Play, Plus, RefreshCw, Save, ShieldCheck, SlidersHorizontal, Upload, X } from 'lucide-react';
 import { listVoicePacks, saveVoiceProfile, uploadProjectMedia } from './workflow.js';
 import { useModelRoute } from './useModelRoute.js';
+import { useLocalTtsService } from './useLocalTtsService.js';
 
 const blankProfile = pack => ({
   id:'', packId:pack?.id||'zh-cinematic', name:'', gender:'未指定', ageStyle:'青年', tone:'自然',
@@ -24,11 +25,13 @@ export default function VoiceLibraryPanel({ active, draft, setDraft, notify, onB
   const [editing,setEditing]=useState(null);
   const [saving,setSaving]=useState(false);
   const [playing,setPlaying]=useState('');
-  const [service,setService]=useState({checking:false,status:'unknown',label:'检测服务'});
+  const [libraryError,setLibraryError]=useState('');
   const [pendingAudio,setPendingAudio]=useState(null);
   const audioRef=useRef(null);
   const fileRef=useRef(null);
-  const pack=library.packs.find(item=>item.id===packId)||library.packs[0];
+  const pack=library.packs.find(item=>item.id===packId&&item.engine===voiceRoute.route)
+    ||library.packs.find(item=>item.engine===voiceRoute.route)
+    ||library.packs.find(item=>item.id===packId)||library.packs[0];
   const selectedId=draft.voiceProfileId||active?.voiceProfileId||'';
   const voices=useMemo(()=>pack?.voices||[],[pack]);
   const defaults=pack?.engine==='f5_tts_local'?{speed:1,nfeStep:32,guidance:2,crossFade:.15,seed:-1,removeSilence:false,autoEmotion:true}:{durationFactor:1,seed:-1,autoEmotion:true};
@@ -37,13 +40,34 @@ export default function VoiceLibraryPanel({ active, draft, setDraft, notify, onB
   const selectRoute=route=>{setDraft(previous=>({...previous,voiceEngine:route}));void voiceRoute.setRoute(route)};
   const patchSettings=patch=>setDraft(previous=>{const voiceSettings={...defaults,...(previous.voiceSettings||active?.voiceSettings||{}),...patch};return {...previous,voiceSettings,voiceProfile:previous.voiceProfile&&typeof previous.voiceProfile==='object'?{...previous.voiceProfile,voiceSettings}:previous.voiceProfile}});
 
-  const reload=()=>listVoicePacks().then(data=>{setLibrary(data);if(!data.packs?.some(item=>item.id===packId))setPackId(data.packs?.[0]?.id||'zh-cinematic')}).catch(error=>notify?.(error.message));
-  useEffect(()=>{void reload()},[]);
+  useEffect(() => {
+    const controller = new AbortController();
+    listVoicePacks({ signal: controller.signal }).then(data => {
+      if (controller.signal.aborted) return;
+      setLibrary(data);
+      setPackId(current => data.packs?.some(item => item.id === current) ? current : data.packs?.[0]?.id || 'zh-cinematic');
+    }).catch(error => {
+      if (!controller.signal.aborted) setLibraryError(error.message);
+    });
+    return () => controller.abort();
+  }, []);
   useEffect(()=>{if(draft.voicePackId)setPackId(draft.voicePackId)},[draft.voicePackId]);
-  const readService=async()=>{const response=await fetch('/api/tts/services');const data=await response.json();if(!response.ok)throw new Error(data.error||'状态读取失败');const current=data.services?.[pack?.engine];const next={checking:false,status:current?.ready?'ready':current?.state==='loading'||current?.managed?'starting':'offline',label:current?.ready?'服务已就绪':current?.state==='loading'||current?.managed?'模型加载中':'服务未启动',base:current?.base||''};setService(next);return next};
-  const checkService=async(silent=false)=>{setService({checking:true,status:'starting',label:'正在启动'});try{const response=await fetch('/api/tts/services/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engine:pack?.engine,waitMs:0})});const data=await response.json();if(!response.ok)throw new Error(data.error||'服务启动失败');const next=await readService();if(!silent)notify?.(next.status==='ready'?`${data.label} 已连接`:`${data.label} 正在后台加载`) }catch(error){setService({checking:false,status:'offline',label:'启动失败'});if(!silent)notify?.(error.message)}};
-  useEffect(()=>{if(localMode&&pack?.engine)void checkService(true)},[localMode,pack?.engine]);
-  useEffect(()=>{if(service.status!=='starting')return;const timer=window.setInterval(()=>void readService().catch(()=>{}),2000);return()=>window.clearInterval(timer)},[service.status,pack?.engine]);
+  useEffect(() => { setEditing(null); setPendingAudio(null); }, [pack?.id]);
+  const { service, refresh: refreshService, start: startService } = useLocalTtsService(pack?.engine, localMode);
+  const checkService = async () => {
+    const next = await (service.status === 'ready' ? refreshService() : startService());
+    if (next) notify?.(next.error || (next.status === 'ready' ? '语音服务已连接' : next.label));
+  };
+  useEffect(() => {
+    setPlaying('');
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.onended = null;
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [pack?.id, localMode]);
   useEffect(()=>()=>{if(pendingAudio?.url)URL.revokeObjectURL(pendingAudio.url)},[pendingAudio?.url]);
 
   const bind=voice=>{
@@ -57,12 +81,12 @@ export default function VoiceLibraryPanel({ active, draft, setDraft, notify, onB
     setDraft(previous=>({...previous,...binding}));onBind?.(binding);
     notify?.(`${voice.name} 已绑定到 ${draft.name||active?.name||'当前角色'}`);
   };
-  const openEditor=voice=>{setPendingAudio(null);setEditing({...blankProfile(pack),...voice,packId:pack.id,tags:(voice?.tags||[]).join('，'),rightsConfirmed:Boolean(voice?.rightsConfirmed)})};
+  const openEditor=voice=>{if(!pack)return;setPendingAudio(null);setEditing({...blankProfile(pack),...voice,packId:pack.id,tags:(voice?.tags||[]).join('，'),rightsConfirmed:Boolean(voice?.rightsConfirmed)})};
   const chooseAudio=async event=>{const file=event.target.files?.[0];if(!file)return;try{const duration=await audioDuration(file);setPendingAudio({name:file.name,duration,url:URL.createObjectURL(file)});notify?.(`已导入 ${file.name}，可立即试听`)}catch(error){setPendingAudio({name:file.name,duration:0,url:URL.createObjectURL(file)});notify?.(error.message)}};
   const play=voice=>{
     if(!voice.sampleUrl)return void openEditor(voice);
     if(playing===voice.id){audioRef.current?.pause();setPlaying('');return}
-    audioRef.current?.pause();const audio=new Audio(voice.sampleUrl);audioRef.current=audio;audio.play().then(()=>setPlaying(voice.id)).catch(()=>notify?.('样音播放失败'));audio.onended=()=>setPlaying('');
+    audioRef.current?.pause();const audio=new Audio(voice.sampleUrl);audioRef.current=audio;audio.play().then(()=>{if(audioRef.current===audio)setPlaying(voice.id)}).catch(()=>{if(audioRef.current===audio)notify?.('样音播放失败')});audio.onended=()=>{if(audioRef.current===audio)setPlaying('')};
   };
   const save=async()=>{
     const file=fileRef.current?.files?.[0];
@@ -84,11 +108,13 @@ export default function VoiceLibraryPanel({ active, draft, setDraft, notify, onB
   };
 
   return <section className="voice-library-panel">
-    <header><div><Mic2/><span><b>声音生成方式</b><small>{localMode?'本地参数合成，不发送创作资料':'API 表演生成，使用剧情提示词'}</small></span></div>{localMode&&<button className="outline" onClick={()=>openEditor()}><Plus/>添加音色</button>}</header>
+    <header><div><Mic2/><span><b>声音生成方式</b><small>{localMode?'本地参数合成，不发送创作资料':'API 表演生成，使用剧情提示词'}</small></span></div>{localMode&&<button className="outline" disabled={!pack} onClick={()=>openEditor()}><Plus/>添加音色</button>}</header>
     <div className="voice-mode-tabs"><button className={localMode?'active':''} onClick={()=>selectRoute(pack?.engine||'index_tts_local')}><b>本地合成</b><small>IndexTTS / F5-TTS</small></button><button className={!localMode?'active':''} onClick={()=>selectRoute(apiRoutes[0]?.id||'eleven_v3')}><b>API 生成</b><small>剧情与表演提示词</small></button><select aria-label="选择声音生成模型" value={voiceRoute.route} onChange={event=>selectRoute(event.target.value)}>{(localMode?localRoutes:apiRoutes).map(item=><option value={item.id} key={item.id}>{item.provider} · {item.name}</option>)}</select></div>
     {!localMode&&<div className="api-voice-setup"><div><Bot/><span><b>{voiceRoute.selected?.name}</b><small>场景、人物目标、潜台词、情绪和停顿将组成表演提示词；API 才接收自然语言导演指令。</small></span></div><label>供应商 Voice ID<input value={draft.voiceId||active?.voiceId||''} onChange={event=>setDraft(previous=>({...previous,voiceId:event.target.value,voiceEngine:voiceRoute.route}))} placeholder="可留空并使用 API 页面默认 Voice ID"/></label><div className="api-performance-fields"><span>台词原文</span><span>场景上下文</span><span>角色目标</span><span>潜台词</span><span>情绪与强度</span><span>停顿与重音</span></div></div>}
-    {localMode&&<><nav aria-label="语音包">{library.packs.map(item=><button key={item.id} className={packId===item.id?'active':''} onClick={()=>{setPackId(item.id);setEditing(null);selectRoute(item.engine)}}><b>{item.language.startsWith('zh')?'中文':'English'}</b><small>{item.engine==='index_tts_local'?'IndexTTS':'F5-TTS'}</small></button>)}</nav>
-    <div className={`voice-service-state ${service.status}`}><span><i/>{service.label}<small>{service.base||'按项目配置地址'}</small></span><button disabled={service.checking} onClick={()=>checkService(false)}>{service.checking?<LoaderCircle className="spin"/>:<RefreshCw/>}检测</button></div>
+    {localMode&&<><nav aria-label="语音包">{library.packs.map(item=><button key={item.id} className={pack?.id===item.id?'active':''} onClick={()=>{setPackId(item.id);setEditing(null);selectRoute(item.engine)}}><b>{item.language.startsWith('zh')?'中文':'English'}</b><small>{item.engine==='index_tts_local'?'IndexTTS':'F5-TTS'}</small></button>)}</nav>
+    {libraryError&&<p role="alert" className="voice-rights-note">{libraryError}，请重新打开语音库重试。</p>}
+    <div className={`voice-service-state ${service.status}`}><span><i/>{service.label}<small>{service.base||'按项目配置地址'}</small></span><button disabled={!pack||service.checking} onClick={checkService}>{service.checking?<LoaderCircle className="spin"/>:<RefreshCw/>}{service.status==='ready'?'刷新状态':'启动服务'}</button></div>
+    {service.error&&<p role="alert" className="voice-rights-note">{service.error}</p>}
     <div className="voice-library-list">{voices.map(voice=><article key={voice.id} className={`${selectedId===voice.id?'selected':''} ${voice.status==='ready'?'ready':'needs-sample'}`}>
       <button className="voice-sample-play" aria-label={`${playing===voice.id?'暂停':'试听'}${voice.name}`} onClick={()=>play(voice)}>{playing===voice.id?<Pause/>:voice.sampleUrl?<Play/>:<Upload/>}</button>
       <button className="voice-card-main" onClick={()=>bind(voice)}><b>{voice.name}</b><span>{voice.tone} · {voice.usage}</span><small>{voice.status==='ready'?'样音就绪':'待导入参考音频'}</small></button>
